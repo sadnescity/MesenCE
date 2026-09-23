@@ -2,6 +2,8 @@ using Mesen.Interop;
 using Mesen.Mcp.Tools;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using ModelContextProtocol.AspNetCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
@@ -49,7 +51,12 @@ namespace Mesen.Mcp
 							Version = Interop.EmuApi.GetMesenVersion().ToString(3)
 						};
 					})
-					.WithHttpTransport()
+					.WithHttpTransport(options => {
+						// Dual-era endpoint: 2026-07-28+ clients (per-request _meta, server/discover) are served
+						// statelessly, while clients using the legacy initialize handshake (2025-11-25 and earlier)
+						// keep a full Mcp-Session-Id session on the same /mcp endpoint.
+						options.SessionMode = HttpServerSessionMode.StatefulForInitializeClients;
+					})
 					.WithTools<DebugExecutionTools>()
 					.WithTools<DisassemblyTools>()
 					.WithTools<EmulatorTools>()
@@ -65,6 +72,17 @@ namespace Mesen.Mcp
 					.WithResources<MesenMcpResources>();
 
 				_app = builder.Build();
+
+				// Reject cross-origin requests from non-local pages to prevent DNS rebinding attacks (required by the Streamable HTTP transport)
+				_app.Use(async (context, next) => {
+					string? origin = context.Request.Headers.Origin;
+					if(!string.IsNullOrEmpty(origin) && !IsLocalOrigin(origin)) {
+						context.Response.StatusCode = StatusCodes.Status403Forbidden;
+						return;
+					}
+					await next(context);
+				});
+
 				_app.MapMcp("/mcp");
 
 				_logger = _app.Services.GetService<ILoggerFactory>()?.CreateLogger<MesenMcpServer>();
@@ -81,6 +99,14 @@ namespace Mesen.Mcp
 				_isRunning = false;
 				_logger?.LogError(ex, "Failed to start MCP server");
 			}
+		}
+
+		private static bool IsLocalOrigin(string origin)
+		{
+			if(!Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri)) {
+				return false;
+			}
+			return uri.IsLoopback;
 		}
 
 		/// <summary>
