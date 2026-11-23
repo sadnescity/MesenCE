@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using Mesen.Debugger;
 using Mesen.Interop;
 using Mesen.Mcp.Consoles;
@@ -63,6 +64,11 @@ namespace Mesen.Mcp.Tools
 		{
 			McpToolHelper.EnsureDebuggerReady();
 
+			// BreakpointManager is UI state: changing it notifies the open debugger windows,
+			// which update their controls synchronously, and only then sends the list to the
+			// emulator. Tool calls run on a server thread, so every BreakpointManager access
+			// goes through the UI thread -- otherwise an open debugger window throws midway
+			// and the breakpoint is listed but never reaches the emulator.
 			switch(action.ToLowerInvariant()) {
 				case "set": {
 					if(address == null) {
@@ -112,8 +118,10 @@ namespace Mesen.Mcp.Tools
 						Condition = condition ?? ""
 					};
 
-					BreakpointManager.AddCpuType(cpu);
-					BreakpointManager.AddBreakpoint(bp);
+					Dispatcher.UIThread.Invoke(() => {
+						BreakpointManager.AddCpuType(cpu);
+						BreakpointManager.AddBreakpoint(bp);
+					});
 
 					string summary = "Breakpoint set: $" + addr.ToString("X4");
 					if(endAddr != addr) {
@@ -137,31 +145,34 @@ namespace Mesen.Mcp.Tools
 					uint addr = McpToolHelper.ParseAddress(address);
 					MemoryType memType = McpToolHelper.ParseMemoryType(memoryType);
 
-					Breakpoint? target = null;
-					foreach(Breakpoint bp in BreakpointManager.Breakpoints) {
-						if(bp.StartAddress == addr && bp.MemoryType == memType) {
-							target = bp;
-							break;
+					Breakpoint? target = Dispatcher.UIThread.Invoke(() => {
+						foreach(Breakpoint bp in BreakpointManager.Breakpoints) {
+							if(bp.StartAddress == addr && bp.MemoryType == memType) {
+								BreakpointManager.RemoveBreakpoint(bp);
+								return bp;
+							}
 						}
-					}
+						return null;
+					});
 
 					if(target == null) {
 						throw new McpException($"No breakpoint found at ${addr:X4} ({memoryType}). Use mesen_breakpoint with action 'list' to see active breakpoints.");
 					}
 
-					BreakpointManager.RemoveBreakpoint(target);
 					return "Removed breakpoint at $" + target.StartAddress.ToString("X4") + " (" + target.MemoryType + ")";
 				}
 
 				case "remove_all": {
-					BreakpointManager.ClearBreakpoints();
+					Dispatcher.UIThread.Invoke(BreakpointManager.ClearBreakpoints);
 					return "All breakpoints removed.";
 				}
 
 				case "list": {
+					// Breakpoints returns a snapshot, but taking it must not race the UI editing the list
+					IReadOnlyList<Breakpoint> breakpoints = Dispatcher.UIThread.Invoke(() => BreakpointManager.Breakpoints);
 					StringBuilder sb = new();
 					int index = 0;
-					foreach(Breakpoint bp in BreakpointManager.Breakpoints) {
+					foreach(Breakpoint bp in breakpoints) {
 						string rwx = (bp.BreakOnExec ? "X" : "-") + (bp.BreakOnRead ? "R" : "-") + (bp.BreakOnWrite ? "W" : "-");
 						sb.Append(index++).Append('\t')
 							.Append(bp.Enabled ? "on" : "off").Append('\t')
