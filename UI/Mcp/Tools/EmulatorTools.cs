@@ -85,7 +85,7 @@ namespace Mesen.Mcp.Tools
 
 			string tempPath = Path.Combine(Path.GetTempPath(), "mesen_screenshot_" + Guid.NewGuid().ToString("N") + ".png");
 			try {
-				Int32 bytesWritten = EmuApi.TakeScreenshotToFile(tempPath);
+				Int32 bytesWritten = McpNativeApi.TakeScreenshotToFile(tempPath);
 				if(bytesWritten <= 0) {
 					throw new McpException("Failed to capture screenshot.");
 				}

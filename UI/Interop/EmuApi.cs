@@ -53,7 +53,6 @@ namespace Mesen.Interop
 		[DllImport(DllPath)][return: MarshalAs(UnmanagedType.I1)] public static extern bool IsPaused();
 
 		[DllImport(DllPath)] public static extern void TakeScreenshot();
-		[DllImport(DllPath)] public static extern Int32 TakeScreenshotToFile([MarshalAs(UnmanagedType.LPUTF8Str)] string filepath);
 
 		[DllImport(DllPath)] public static extern void ProcessAudioPlayerAction(AudioPlayerActionParams p);
 

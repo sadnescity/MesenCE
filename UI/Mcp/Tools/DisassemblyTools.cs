@@ -14,10 +14,11 @@ namespace Mesen.Mcp.Tools
 	public class DisassemblyTools
 	{
 		[McpServerTool(Name = "mesen_disassemble", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
-		 Description("Disassemble code at a given address. Returns disassembly lines with address, bytecode, and mnemonic.")]
+		 Description("Disassemble instructions starting exactly at an address, including code that has not run yet. Changes nothing: the Code Data Logger and the debugger's view are left as they were. " +
+			"Each line is address, bytecode, instruction. Lines marked 'unverified' are in memory the Code Data Logger has not seen execute: they may be data decoded as instructions, and on SNES their operand sizes are guessed from the current M/X flags.")]
 		public static string Disassemble(
 			[Description("Start address (decimal or 0x/$ hex)")] string address,
-			[Description("Number of lines to disassemble (max 500)")] int lineCount,
+			[Description("Number of instructions to disassemble (max 500)")] int lineCount,
 			[Description("CPU type: Nes, Snes, Gameboy, Gba, Pce, Sms, Ws, Spc, Sa1, Gsu, Cx4")] string cpuType,
 			[Description("Optional file path to save disassembly text")] string? outputFile = null)
 		{
@@ -25,24 +26,33 @@ namespace Mesen.Mcp.Tools
 			uint addr = McpToolHelper.ParseAddress(address);
 			CpuType cpu = McpToolHelper.ParseCpuType(cpuType);
 
-			lineCount = Math.Min(lineCount, 500);
+			lineCount = Math.Clamp(lineCount, 1, 500);
 
-			int rowIndex = DebugApi.GetDisassemblyRowAddress(cpu, addr, 0);
-			if(rowIndex < 0) {
-				throw new McpException("Cannot disassemble at address $" + addr.ToString("X4"));
+			CodeLineData[] lines = McpNativeApi.PeekDisassembly(cpu, addr, (uint)lineCount);
+			if(lines.Length == 0) {
+				throw new McpException("Nothing to disassemble at $" + addr.ToString("X4") + " for " + cpu + ": the address is unmapped or I/O, or this CPU is not present in the loaded ROM.");
 			}
-
-			CodeLineData[] lines = DebugApi.GetDisassemblyOutput(cpu, (uint)rowIndex, (uint)lineCount);
 
 			StringBuilder sb = new();
 			foreach(CodeLineData line in lines) {
-				if(line.Address >= 0 && !string.IsNullOrWhiteSpace(line.Text)) {
-					sb.Append('$').Append(line.Address.ToString("X4")).Append(": ").Append(line.Text);
-					if(!string.IsNullOrEmpty(line.Comment)) {
-						sb.Append("  ; ").Append(line.Comment);
-					}
-					sb.AppendLine();
+				if(line.Flags.HasFlag(LineFlags.Label)) {
+					sb.Append(line.Text).AppendLine(":");
+					continue;
 				}
+
+				sb.Append('$').Append(line.Address.ToString("X4")).Append(": ")
+					.Append(line.ByteCodeStr.PadRight(12)).Append(line.Text);
+
+				string comment = line.Comment.Replace('\n', ' ');
+				bool unverified = line.Flags.HasFlag(LineFlags.UnexecutedCode);
+				if(comment.Length > 0 || unverified) {
+					sb.Append("  ; ");
+					if(unverified) {
+						sb.Append(comment.Length > 0 ? "unverified, " : "unverified");
+					}
+					sb.Append(comment);
+				}
+				sb.AppendLine();
 			}
 
 			string text = sb.ToString();
