@@ -1,4 +1,6 @@
+using Avalonia.Threading;
 using Mesen.Config;
+using Mesen.Debugger;
 using Mesen.Interop;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
@@ -7,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
+using System.Text;
 
 namespace Mesen.Mcp.Tools
 {
@@ -62,7 +65,7 @@ namespace Mesen.Mcp.Tools
 		}
 
 		[McpServerTool(Name = "mesen_get_status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
-		 Description("Get the current emulator status: running, paused, timing info.")]
+		 Description("Get the current emulator status: running or paused (with the reason when known, e.g. which breakpoint was hit and by what access), and timing info.")]
 		public static string GetStatus()
 		{
 			if(!EmuApi.IsRunning()) {
@@ -73,7 +76,51 @@ namespace Mesen.Mcp.Tools
 			CpuType mainCpu = info.ConsoleType.GetMainCpuType();
 			TimingInfo timing = EmuApi.GetTimingInfo(mainCpu);
 
-			return "Running " + info.ConsoleType + " " + info.GetRomName() + " " + Math.Round(timing.Fps, 2) + "fps frame=" + timing.FrameCount;
+			string state = EmuApi.IsPaused() ? "Paused" + DescribePauseReason() : "Running";
+			return state + " " + info.ConsoleType + " " + info.GetRomName() + " " + Math.Round(timing.Fps, 2) + "fps frame=" + timing.FrameCount;
+		}
+
+		/// <summary>
+		/// Why emulation is paused, e.g. " (breakpoint #0 $00:EC0A SnesMemory, hit by ExecOpCode at $00:EC0A) PC=$00:EC0A",
+		/// or "" when not known (e.g. paused from the UI without the debugger).
+		/// </summary>
+		private static string DescribePauseReason()
+		{
+			BreakEvent? lastBreak = McpBreakTracker.LastBreak;
+			if(lastBreak == null) {
+				return "";
+			}
+			BreakEvent evt = lastBreak.Value;
+
+			StringBuilder sb = new(" (");
+			if(evt.Source == BreakSource.Breakpoint) {
+				// Breakpoint ids are indexes into BreakpointManager's list, the same numbering mesen_breakpoint 'list' shows
+				sb.Append("breakpoint #").Append(evt.BreakpointId);
+				Breakpoint? bp = Dispatcher.UIThread.Invoke(() => BreakpointManager.GetBreakpointById(evt.BreakpointId));
+				if(bp != null) {
+					sb.Append(' ').Append(McpToolHelper.FormatAddress(bp.StartAddress, bp.MemoryType));
+					if(bp.EndAddress != bp.StartAddress) {
+						sb.Append('-').Append(McpToolHelper.FormatAddress(bp.EndAddress, bp.MemoryType));
+					}
+					sb.Append(' ').Append(bp.MemoryType);
+				}
+
+				// The access that triggered it; DmaRead/DmaWrite means a DMA transfer, not the CPU at PC
+				MemoryOperationInfo op = evt.Operation;
+				sb.Append(", hit by ").Append(op.Type).Append(" at ").Append(McpToolHelper.FormatAddress(op.Address, op.MemType));
+				if(op.Type != MemoryOperationType.ExecOpCode && op.Type != MemoryOperationType.ExecOperand) {
+					sb.Append(" value=$").Append(op.Value.ToString("X2"));
+				}
+			} else {
+				sb.Append(evt.Source);
+			}
+			sb.Append(')');
+
+			if(McpToolHelper.IsDebuggerReady()) {
+				uint pc = DebugApi.GetProgramCounter(evt.SourceCpu, false);
+				sb.Append(" PC=").Append(McpToolHelper.FormatCpuAddress(pc, evt.SourceCpu));
+			}
+			return sb.ToString();
 		}
 
 		[McpServerTool(Name = "mesen_take_screenshot", ReadOnly = true, Destructive = false, OpenWorld = false),
@@ -93,7 +140,7 @@ namespace Mesen.Mcp.Tools
 				byte[] pngData = File.ReadAllBytes(tempPath);
 
 				if(!string.IsNullOrEmpty(outputFile)) {
-					File.Copy(tempPath, outputFile, true);
+					McpToolHelper.WriteOutputFile(outputFile, path => File.Copy(tempPath, path, true));
 					yield return new TextContentBlock { Text = "Saved to " + outputFile };
 				}
 

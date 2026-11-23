@@ -70,12 +70,12 @@ namespace Mesen.Mcp.Tools
 				if(showCpuType) {
 					sb.Append('[').Append(row.Type).Append("] ");
 				}
-				sb.Append('$').Append(row.ProgramCounter.ToString("X4")).Append(": ").AppendLine(row.GetOutput());
+				sb.Append(McpToolHelper.FormatCpuAddress(row.ProgramCounter, row.Type)).Append(": ").AppendLine(row.GetOutput());
 			}
 
 			string text = sb.ToString();
 			if(!string.IsNullOrEmpty(outputFile)) {
-				File.WriteAllText(outputFile, text);
+				McpToolHelper.WriteOutputFile(outputFile, path => File.WriteAllText(path, text));
 			}
 			return text;
 		}
@@ -137,7 +137,7 @@ namespace Mesen.Mcp.Tools
 							continue;
 						}
 
-						sb.Append('$').Append(f.Address.Address.ToString("X4"))
+						sb.Append(McpToolHelper.FormatAddress((uint)f.Address.Address, f.Address.Type))
 							.Append(' ').Append(f.Address.Type)
 							.Append(" calls=").Append(f.CallCount)
 							.Append(" incl=").Append(f.InclusiveCycles)
@@ -149,7 +149,7 @@ namespace Mesen.Mcp.Tools
 
 					string text = sb.ToString();
 					if(!string.IsNullOrEmpty(outputFile)) {
-						File.WriteAllText(outputFile, text);
+						McpToolHelper.WriteOutputFile(outputFile, path => File.WriteAllText(path, text));
 					}
 					return text;
 				}

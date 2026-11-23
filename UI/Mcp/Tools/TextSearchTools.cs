@@ -71,7 +71,7 @@ namespace Mesen.Mcp.Tools
 						}
 					}
 
-					matchLines.Append('$').Append((start + offset).ToString("X4"))
+					matchLines.Append(McpToolHelper.FormatAddress((uint)(start + offset), memType))
 						.Append(" first=$").Append(firstByte.ToString("X2"))
 						.Append(" offset=").AppendLine(baseOffset.ToString());
 					matchCount++;
@@ -218,7 +218,7 @@ namespace Mesen.Mcp.Tools
 					}
 				}
 				if(found) {
-					matchAddresses.Add("$" + (start + offset).ToString("X4"));
+					matchAddresses.Add(McpToolHelper.FormatAddress((uint)(start + offset), memType));
 				}
 			}
 
@@ -232,7 +232,7 @@ namespace Mesen.Mcp.Tools
 		[McpServerTool(Name = "mesen_decode_text", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
 		 Description("Decode a region of memory as text using the currently loaded TBL. Reads bytes and converts them to characters using the table mapping. Useful to read game text once you have the correct TBL.")]
 		public static string DecodeText(
-			[Description("Start address (decimal or 0x/$ hex)")] string address,
+			[Description("Start address (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string address,
 			[Description("Number of bytes to decode (max 4096)")] int length,
 			[Description("Memory type (call mesen_list_memory_types first to get valid values for the current ROM)")] string memoryType,
 			[Description("Optional hex byte value that marks end-of-string (e.g. 'FF' or '00'). Decoding stops at this byte.")] string? endMarker = null)

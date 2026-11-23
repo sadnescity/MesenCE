@@ -2,6 +2,7 @@ using Mesen.Interop;
 using Mesen.Mcp.Models;
 using ModelContextProtocol;
 using System;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
@@ -95,9 +96,47 @@ namespace Mesen.Mcp.Tools
 		public static uint ParseAddress(string address)
 		{
 			if(!TryParseAddress(address, out uint result)) {
-				throw new McpException("Invalid address: " + address);
+				throw new McpException("Invalid address: " + address + ". Use decimal, $hex or 0xhex, or $BB:AAAA (bank:address).");
 			}
 			return result;
+		}
+
+		/// <summary>
+		/// Formats an address in the given memory type. CPU addresses on the SNES-family CPUs are 24-bit, so they
+		/// are printed the way SNES documentation writes them, $BB:AAAA, with a fixed width: that way they cannot
+		/// be mistaken for ROM offsets, which stay plain hex. Other memory types are printed as before.
+		/// </summary>
+		public static string FormatAddress(uint address, MemoryType memType)
+		{
+			return memType switch {
+				MemoryType.SnesMemory or MemoryType.Sa1Memory or MemoryType.GsuMemory or MemoryType.Cx4Memory =>
+					"$" + (address >> 16).ToString("X2") + ":" + (address & 0xFFFF).ToString("X4"),
+				_ => "$" + address.ToString("X4")
+			};
+		}
+
+		/// <summary>Formats an address in a CPU's address space (see <see cref="FormatAddress"/>).</summary>
+		public static string FormatCpuAddress(uint address, CpuType cpu)
+		{
+			return FormatAddress(address, cpu.ToMemoryType());
+		}
+
+		/// <summary>
+		/// Writes a tool's outputFile, creating missing folders. Failures are reported as McpExceptions so the
+		/// caller sees the actual reason: the MCP SDK replaces any other exception with a generic error message.
+		/// </summary>
+		public static void WriteOutputFile(string path, Action<string> write)
+		{
+			try {
+				string fullPath = Path.GetFullPath(path);
+				string? folder = Path.GetDirectoryName(fullPath);
+				if(!string.IsNullOrEmpty(folder)) {
+					Directory.CreateDirectory(folder);
+				}
+				write(fullPath);
+			} catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
+				throw new McpException("Could not write '" + path + "': " + ex.Message);
+			}
 		}
 
 		public static MemoryType ParseMemoryType(string memoryType)
@@ -118,14 +157,35 @@ namespace Mesen.Mcp.Tools
 
 		public static bool TryParseAddress(string address, out uint result)
 		{
-			address = address.Trim();
-			if(address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) {
-				return uint.TryParse(address.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out result);
-			} else if(address.StartsWith("$")) {
-				return uint.TryParse(address.Substring(1), System.Globalization.NumberStyles.HexNumber, null, out result);
-			} else {
-				return uint.TryParse(address, out result);
+			const System.Globalization.NumberStyles hex = System.Globalization.NumberStyles.HexNumber;
+
+			string digits = address.Trim();
+			bool isHex = false;
+			if(digits.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) {
+				digits = digits.Substring(2);
+				isHex = true;
+			} else if(digits.StartsWith("$")) {
+				digits = digits.Substring(1);
+				isHex = true;
 			}
+
+			int colon = digits.IndexOf(':');
+			if(colon >= 0) {
+				//Bank:address ($BB:AAAA), the usual way to write SNES CPU addresses; always hex
+				result = 0;
+				string bankDigits = digits.Substring(0, colon);
+				string offsetDigits = digits.Substring(colon + 1);
+				if(!uint.TryParse(bankDigits, hex, null, out uint bank) || bank > 0xFF) {
+					return false;
+				}
+				if(!uint.TryParse(offsetDigits, hex, null, out uint offset) || offset > 0xFFFF) {
+					return false;
+				}
+				result = (bank << 16) | offset;
+				return true;
+			}
+
+			return isHex ? uint.TryParse(digits, hex, null, out result) : uint.TryParse(digits, out result);
 		}
 
 		public static string FormatFlags6502(byte ps)

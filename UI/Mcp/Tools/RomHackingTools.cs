@@ -97,7 +97,7 @@ namespace Mesen.Mcp.Tools
 
 		[McpServerTool(Name = "mesen_get_tile_pixel", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Read a single pixel from a tile in memory.")]
 		public static string GetTilePixel(
-			[Description("Tile address in memory (decimal or 0x/$ hex)")] string tileAddress,
+			[Description("Tile address in memory (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string tileAddress,
 			[Description("Tile pixel format (case-insensitive): Bpp2, Bpp4, Bpp8, NesBpp2, SmsBpp4, GbaBpp4, GbaBpp8, PceBpp4, WsBpp2, DirectColor")] string format,
 			[Description("X coordinate within the tile (0-7 or 0-15)")] int x,
 			[Description("Y coordinate within the tile (0-7 or 0-15)")] int y,
@@ -121,7 +121,7 @@ namespace Mesen.Mcp.Tools
 
 		[McpServerTool(Name = "mesen_set_tile_pixel", ReadOnly = false, Destructive = false, OpenWorld = false), Description("Set a single pixel in a tile in memory.")]
 		public static string SetTilePixel(
-			[Description("Tile address in memory (decimal or 0x/$ hex)")] string tileAddress,
+			[Description("Tile address in memory (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string tileAddress,
 			[Description("Tile pixel format (case-insensitive): Bpp2, Bpp4, Bpp8, NesBpp2, SmsBpp4, GbaBpp4, GbaBpp8, PceBpp4, WsBpp2, DirectColor")] string format,
 			[Description("X coordinate within the tile")] int x,
 			[Description("Y coordinate within the tile")] int y,

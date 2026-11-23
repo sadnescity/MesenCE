@@ -92,6 +92,8 @@ namespace Mesen.Mcp
 				LastError = null;
 				_logger?.LogInformation("MCP server started on port {Port}", port);
 
+				McpBreakTracker.Start();
+
 				// Auto-initialize debugger and enable tracing for the main CPU
 				InitializeDebuggerAndTracing();
 			} catch(Exception ex) {
@@ -137,6 +139,8 @@ namespace Mesen.Mcp
 			if(!_isRunning || _app == null) {
 				return;
 			}
+
+			McpBreakTracker.Stop();
 
 			try {
 				await _app.StopAsync();

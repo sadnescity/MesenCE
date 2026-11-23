@@ -55,7 +55,7 @@ namespace Mesen.Mcp.Tools
 		 Description("Manage breakpoints. Action: 'set', 'remove', 'remove_all', 'list'.")]
 		public static string Breakpoint(
 			[Description("Action: 'set', 'remove', 'remove_all', 'list'")] string action,
-			[Description("Address (required for set/remove, decimal or 0x/$ hex)")] string? address = null,
+			[Description("Address (required for set/remove; decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string? address = null,
 			[Description("Breakpoint type for set: Execute, Read, Write (comma-separated)")] string? type = null,
 			[Description("Memory type (required for set/remove)")] string? memoryType = null,
 			[Description("CPU type (required for set)")] string? cpuType = null,
@@ -123,9 +123,9 @@ namespace Mesen.Mcp.Tools
 						BreakpointManager.AddBreakpoint(bp);
 					});
 
-					string summary = "Breakpoint set: $" + addr.ToString("X4");
+					string summary = "Breakpoint set: " + McpToolHelper.FormatAddress(addr, memType);
 					if(endAddr != addr) {
-						summary += "-$" + endAddr.ToString("X4");
+						summary += "-" + McpToolHelper.FormatAddress(endAddr, memType);
 					}
 					summary += " " + type + " on " + memoryType + " (" + cpuType + ")";
 					if(!string.IsNullOrEmpty(condition)) {
@@ -159,7 +159,7 @@ namespace Mesen.Mcp.Tools
 						throw new McpException($"No breakpoint found at ${addr:X4} ({memoryType}). Use mesen_breakpoint with action 'list' to see active breakpoints.");
 					}
 
-					return "Removed breakpoint at $" + target.StartAddress.ToString("X4") + " (" + target.MemoryType + ")";
+					return "Removed breakpoint at " + McpToolHelper.FormatAddress(target.StartAddress, target.MemoryType) + " (" + target.MemoryType + ")";
 				}
 
 				case "remove_all": {
@@ -176,9 +176,9 @@ namespace Mesen.Mcp.Tools
 						string rwx = (bp.BreakOnExec ? "X" : "-") + (bp.BreakOnRead ? "R" : "-") + (bp.BreakOnWrite ? "W" : "-");
 						sb.Append(index++).Append('\t')
 							.Append(bp.Enabled ? "on" : "off").Append('\t')
-							.Append('$').Append(bp.StartAddress.ToString("X4"));
+							.Append(McpToolHelper.FormatAddress(bp.StartAddress, bp.MemoryType));
 						if(bp.EndAddress != bp.StartAddress) {
-							sb.Append("-$").Append(bp.EndAddress.ToString("X4"));
+							sb.Append('-').Append(McpToolHelper.FormatAddress(bp.EndAddress, bp.MemoryType));
 						}
 						sb.Append('\t').Append(bp.MemoryType)
 							.Append('\t').Append(bp.CpuType)
@@ -223,14 +223,14 @@ namespace Mesen.Mcp.Tools
 		 Description("Set the program counter to a specific address.")]
 		public static string SetProgramCounter(
 			[Description("CPU type: Nes, Snes, Gameboy, Gba, Pce, Sms, Ws")] string cpuType,
-			[Description("Address to set the PC to (decimal or 0x/$ hex)")] string address)
+			[Description("Address to set the PC to (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string address)
 		{
 			McpToolHelper.EnsureDebuggerReady();
 			CpuType cpu = McpToolHelper.ParseCpuType(cpuType);
 			uint addr = McpToolHelper.ParseAddress(address);
 
 			DebugApi.SetProgramCounter(cpu, addr);
-			return "PC=$" + addr.ToString("X4");
+			return "PC=" + McpToolHelper.FormatCpuAddress(addr, cpu);
 		}
 
 		[McpServerTool(Name = "mesen_get_callstack", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
@@ -244,9 +244,9 @@ namespace Mesen.Mcp.Tools
 			StackFrameInfo[] callstack = DebugApi.GetCallstack(cpu);
 			StringBuilder sb = new();
 			foreach(StackFrameInfo frame in callstack) {
-				sb.Append('$').Append(frame.Source.ToString("X4"))
-					.Append(" -> $").Append(frame.Target.ToString("X4"))
-					.Append(" ret=$").Append(frame.Return.ToString("X4"));
+				sb.Append(McpToolHelper.FormatCpuAddress(frame.Source, cpu))
+					.Append(" -> ").Append(McpToolHelper.FormatCpuAddress(frame.Target, cpu))
+					.Append(" ret=").Append(McpToolHelper.FormatCpuAddress(frame.Return, cpu));
 				string flags = frame.Flags.ToString();
 				if(flags != "None") {
 					sb.Append(' ').Append(flags);
@@ -276,7 +276,7 @@ namespace Mesen.Mcp.Tools
 			UInt32 pc = DebugApi.GetProgramCounter(cpu, false);
 
 			StringBuilder sb = new();
-			sb.Append(cpu).Append(" PC=$").Append(pc.ToString("X4"));
+			sb.Append(cpu).Append(" PC=").Append(McpToolHelper.FormatCpuAddress(pc, cpu));
 
 			try {
 				IConsoleHandler handler = ConsoleHandlerFactory.GetHandler(cpu);

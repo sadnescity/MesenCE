@@ -15,7 +15,7 @@ namespace Mesen.Mcp.Tools
 		[McpServerTool(Name = "mesen_read_memory", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
 		 Description("Read memory from the emulator. Returns a compact hex string. Use mesen_list_memory_types to see valid memory types for the current ROM.")]
 		public static string ReadMemory(
-			[Description("Start address (decimal or 0x/$ hex)")] string address,
+			[Description("Start address (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string address,
 			[Description("Number of bytes to read (max 4096)")] int length,
 			[Description("Memory type (call mesen_list_memory_types first to get valid values for the current ROM)")] string memoryType,
 			[Description("Optional file path to save the raw binary dump")] string? outputFile = null)
@@ -31,11 +31,14 @@ namespace Mesen.Mcp.Tools
 			}
 			length = (int)Math.Min(length, memSize - addr);
 
-			byte[] data = DebugApi.GetMemoryValues(memType, addr, (uint)(addr + length - 1));
+			// The debugger has no buffer behind SnesRegister, so reading it directly always returns zeros. The same
+			// registers can be read without side effects through the CPU bus in bank $00.
+			MemoryType readType = memType == MemoryType.SnesRegister ? MemoryType.SnesMemory : memType;
+			byte[] data = DebugApi.GetMemoryValues(readType, addr, (uint)(addr + length - 1));
 
 			if(!string.IsNullOrEmpty(outputFile)) {
-				File.WriteAllBytes(outputFile, data);
-				return "Dumped " + data.Length + " bytes from $" + addr.ToString("X4") + " to " + outputFile;
+				McpToolHelper.WriteOutputFile(outputFile, path => File.WriteAllBytes(path, data));
+				return "Dumped " + data.Length + " bytes from " + McpToolHelper.FormatAddress(addr, memType) + " to " + outputFile;
 			}
 
 			StringBuilder hex = new(data.Length * 3);
@@ -49,7 +52,7 @@ namespace Mesen.Mcp.Tools
 		[McpServerTool(Name = "mesen_write_memory", ReadOnly = false, Destructive = false, OpenWorld = false),
 		 Description("Write data to emulator memory.")]
 		public static string WriteMemory(
-			[Description("Start address (decimal or 0x/$ hex)")] string address,
+			[Description("Start address (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string address,
 			[Description("Hex string of bytes to write (e.g. 'EAEA' for two NOPs)")] string hexData,
 			[Description("Memory type (call mesen_list_memory_types first to get valid values for the current ROM)")] string memoryType)
 		{
@@ -71,7 +74,7 @@ namespace Mesen.Mcp.Tools
 			}
 
 			DebugApi.SetMemoryValues(memType, addr, data, data.Length);
-			return "Wrote " + data.Length + " bytes at $" + addr.ToString("X4");
+			return "Wrote " + data.Length + " bytes at " + McpToolHelper.FormatAddress(addr, memType);
 		}
 
 		[McpServerTool(Name = "mesen_search_memory", ReadOnly = true, Destructive = false, OpenWorld = false),
@@ -121,7 +124,7 @@ namespace Mesen.Mcp.Tools
 					}
 				}
 				if(found) {
-					matches.Add("$" + (start + i).ToString("X4"));
+					matches.Add(McpToolHelper.FormatAddress((uint)(start + i), memType));
 				}
 			}
 
@@ -134,7 +137,7 @@ namespace Mesen.Mcp.Tools
 		[McpServerTool(Name = "mesen_freeze_address", ReadOnly = false, Destructive = false, OpenWorld = false),
 		 Description("Freeze or unfreeze a memory address range (prevent/allow game writes).")]
 		public static string FreezeAddress(
-			[Description("Start address (decimal or 0x/$ hex)")] string startAddress,
+			[Description("Start address (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string startAddress,
 			[Description("End address (same as start for single byte)")] string endAddress,
 			[Description("CPU type: Nes, Snes, Gameboy, Gba, Pce, Sms, Ws")] string cpuType,
 			[Description("True to freeze (prevent writes), false to unfreeze")] bool freeze)
@@ -145,13 +148,13 @@ namespace Mesen.Mcp.Tools
 			CpuType cpu = McpToolHelper.ParseCpuType(cpuType);
 
 			DebugApi.UpdateFrozenAddresses(cpu, start, end, freeze);
-			return (freeze ? "Frozen" : "Unfrozen") + " $" + start.ToString("X4") + "-$" + end.ToString("X4");
+			return (freeze ? "Frozen" : "Unfrozen") + " " + McpToolHelper.FormatCpuAddress(start, cpu) + "-" + McpToolHelper.FormatCpuAddress(end, cpu);
 		}
 
 		[McpServerTool(Name = "mesen_get_address_info", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false),
 		 Description("Convert between CPU (relative) and absolute (physical) addresses.")]
 		public static string GetAddressInfo(
-			[Description("Address to convert (decimal or 0x/$ hex)")] string address,
+			[Description("Address to convert (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string address,
 			[Description("CPU type: Nes, Snes, Gameboy, Gba, Pce, Sms, Ws")] string cpuType)
 		{
 			McpToolHelper.EnsureDebuggerReady();
@@ -166,16 +169,16 @@ namespace Mesen.Mcp.Tools
 			AddressInfo absAddr = DebugApi.GetAbsoluteAddress(relAddr);
 
 			if(absAddr.Address >= 0) {
-				return "$" + addr.ToString("X4") + " -> $" + absAddr.Address.ToString("X4") + " (" + absAddr.Type + ")";
+				return McpToolHelper.FormatCpuAddress(addr, cpu) + " -> " + McpToolHelper.FormatAddress((uint)absAddr.Address, absAddr.Type) + " (" + absAddr.Type + ")";
 			}
-			return "$" + addr.ToString("X4") + " -> unmapped";
+			return McpToolHelper.FormatCpuAddress(addr, cpu) + " -> unmapped";
 		}
 
 		[McpServerTool(Name = "mesen_memory_access_counts", ReadOnly = false, Destructive = false, OpenWorld = false),
 		 Description("Get or reset memory access counters. Action: 'get' (returns read/write/exec counts) or 'reset' (clears all counters).")]
 		public static string MemoryAccessCounts(
 			[Description("Action: 'get' or 'reset'")] string action,
-			[Description("Start address for get (decimal or 0x/$ hex)")] string? address = null,
+			[Description("Start address for get (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string? address = null,
 			[Description("Number of bytes for get (max 256)")] int length = 256,
 			[Description("Memory type for get")] string? memoryType = null)
 		{
@@ -210,7 +213,7 @@ namespace Mesen.Mcp.Tools
 					for(int i = 0; i < counts.Length; i++) {
 						AddressCounters c = counts[i];
 						if(c.ReadCounter > 0 || c.WriteCounter > 0 || c.ExecCounter > 0) {
-							sb.Append('$').Append((addr + i).ToString("X4"));
+							sb.Append(McpToolHelper.FormatAddress((uint)(addr + i), memType));
 							if(c.ReadCounter > 0) sb.Append(" R=").Append(c.ReadCounter);
 							if(c.WriteCounter > 0) sb.Append(" W=").Append(c.WriteCounter);
 							if(c.ExecCounter > 0) sb.Append(" X=").Append(c.ExecCounter);

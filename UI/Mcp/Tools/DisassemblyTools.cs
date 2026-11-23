@@ -17,7 +17,7 @@ namespace Mesen.Mcp.Tools
 		 Description("Disassemble instructions starting exactly at an address, including code that has not run yet. Changes nothing: the Code Data Logger and the debugger's view are left as they were. " +
 			"Each line is address, bytecode, instruction. Lines marked 'unverified' are in memory the Code Data Logger has not seen execute: they may be data decoded as instructions, and on SNES their operand sizes are guessed from the current M/X flags.")]
 		public static string Disassemble(
-			[Description("Start address (decimal or 0x/$ hex)")] string address,
+			[Description("Start address (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string address,
 			[Description("Number of instructions to disassemble (max 500)")] int lineCount,
 			[Description("CPU type: Nes, Snes, Gameboy, Gba, Pce, Sms, Ws, Spc, Sa1, Gsu, Cx4")] string cpuType,
 			[Description("Optional file path to save disassembly text")] string? outputFile = null)
@@ -30,7 +30,7 @@ namespace Mesen.Mcp.Tools
 
 			CodeLineData[] lines = McpNativeApi.PeekDisassembly(cpu, addr, (uint)lineCount);
 			if(lines.Length == 0) {
-				throw new McpException("Nothing to disassemble at $" + addr.ToString("X4") + " for " + cpu + ": the address is unmapped or I/O, or this CPU is not present in the loaded ROM.");
+				throw new McpException("Nothing to disassemble at " + McpToolHelper.FormatCpuAddress(addr, cpu) + " for " + cpu + ": the address is unmapped or I/O, or this CPU is not present in the loaded ROM.");
 			}
 
 			StringBuilder sb = new();
@@ -40,7 +40,7 @@ namespace Mesen.Mcp.Tools
 					continue;
 				}
 
-				sb.Append('$').Append(line.Address.ToString("X4")).Append(": ")
+				sb.Append(McpToolHelper.FormatCpuAddress((uint)line.Address, cpu)).Append(": ")
 					.Append(line.ByteCodeStr.PadRight(12)).Append(line.Text);
 
 				string comment = line.Comment.Replace('\n', ' ');
@@ -57,7 +57,7 @@ namespace Mesen.Mcp.Tools
 
 			string text = sb.ToString();
 			if(!string.IsNullOrEmpty(outputFile)) {
-				File.WriteAllText(outputFile, text);
+				McpToolHelper.WriteOutputFile(outputFile, path => File.WriteAllText(path, text));
 			}
 			return text;
 		}
@@ -85,7 +85,7 @@ namespace Mesen.Mcp.Tools
 			StringBuilder sb = new();
 			foreach(CodeLineData line in results) {
 				if(line.Address >= 0) {
-					sb.Append('$').Append(line.Address.ToString("X4")).Append(": ").AppendLine(line.Text);
+					sb.Append(McpToolHelper.FormatCpuAddress((uint)line.Address, cpu)).Append(": ").AppendLine(line.Text);
 				}
 			}
 			return sb.Length > 0 ? sb.ToString() : "No matches.";
@@ -95,7 +95,7 @@ namespace Mesen.Mcp.Tools
 		 Description("Assemble code at a given address. Returns assembled bytes or errors.")]
 		public static string Assemble(
 			[Description("Assembly code (one or more lines, newline separated)")] string code,
-			[Description("Start address (decimal or 0x/$ hex)")] string startAddress,
+			[Description("Start address (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string startAddress,
 			[Description("CPU type: Nes, Snes, Gameboy, Gba, Pce, Sms, Ws, Spc, Sa1, Gsu, Cx4")] string cpuType)
 		{
 			McpToolHelper.EnsureDebuggerReady();
@@ -136,14 +136,14 @@ namespace Mesen.Mcp.Tools
 				hexStr.Append(b.ToString("X2"));
 			}
 
-			return "Assembled " + bytes.Count + " bytes at $" + addr.ToString("X4") + ": " + hexStr;
+			return "Assembled " + bytes.Count + " bytes at " + McpToolHelper.FormatCpuAddress(addr, cpu) + ": " + hexStr;
 		}
 
 		[McpServerTool(Name = "mesen_label", ReadOnly = false, Destructive = false, OpenWorld = false),
 		 Description("Manage labels. Use action 'set' to set a label on an address, or 'clear_all' to remove all labels.")]
 		public static string Label(
 			[Description("Action: 'set' or 'clear_all'")] string action,
-			[Description("Address (decimal or 0x/$ hex) - required for 'set'")] string? address = null,
+			[Description("Address (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address) - required for 'set'")] string? address = null,
 			[Description("Memory type (call mesen_list_memory_types first) - required for 'set'")] string? memoryType = null,
 			[Description("Label text - required for 'set'")] string? label = null,
 			[Description("Optional comment - used with 'set'")] string? comment = null)
@@ -166,7 +166,7 @@ namespace Mesen.Mcp.Tools
 					MemoryType memType = McpToolHelper.ParseMemoryType(memoryType);
 
 					DebugApi.SetLabel(addr, memType, label, comment ?? "");
-					return "Label '" + label + "' set at $" + addr.ToString("X4");
+					return "Label '" + label + "' set at " + McpToolHelper.FormatAddress(addr, memType);
 
 				case "clear_all":
 					DebugApi.ClearLabels();
@@ -213,8 +213,8 @@ namespace Mesen.Mcp.Tools
 		[McpServerTool(Name = "mesen_mark_bytes_as", ReadOnly = false, Destructive = false, OpenWorld = false),
 		 Description("Mark a range of bytes as Code, Data, or unidentified in the Code Data Logger.")]
 		public static string MarkBytesAs(
-			[Description("Start address (decimal or 0x/$ hex)")] string startAddress,
-			[Description("End address (decimal or 0x/$ hex)")] string endAddress,
+			[Description("Start address (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string startAddress,
+			[Description("End address (decimal, $hex/0xhex, or $BB:AAAA for SNES bank:address)")] string endAddress,
 			[Description("Memory type (call mesen_list_memory_types first to get valid values for the current ROM)")] string memoryType,
 			[Description("CDL flags (case-insensitive): None, Code, Data, JumpTarget, SubEntryPoint")] string flags)
 		{
@@ -228,7 +228,7 @@ namespace Mesen.Mcp.Tools
 			}
 
 			DebugApi.MarkBytesAs(memType, start, end, cdlFlags);
-			return "Marked $" + start.ToString("X4") + "-$" + end.ToString("X4") + " as " + flags;
+			return "Marked " + McpToolHelper.FormatAddress(start, memType) + "-" + McpToolHelper.FormatAddress(end, memType) + " as " + flags;
 		}
 
 		[McpServerTool(Name = "mesen_cdl_file", ReadOnly = false, Destructive = false, OpenWorld = false),
