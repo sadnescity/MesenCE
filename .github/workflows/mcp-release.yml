@@ -13,6 +13,12 @@ on:
     workflows: ["Build Mesen"]
     types: [completed]
 
+# Runs one at a time: one run removing the release while another publishes it
+# would leave two releases, or none.
+concurrency:
+  group: mcp-release
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Publish release
@@ -54,6 +60,18 @@ jobs:
             cp "$f" "release/MesenCE-MCP-${v}${ext}"
           done
           ls -la release/
+
+      # The tag has to follow the commit that was built, or the release's
+      # "Source code" archives keep coming from whatever commit the tag was
+      # first created on. The publish step never moves an existing tag
+      # (target_commitish only applies when it creates one), so the previous
+      # release and its tag are removed here and the publish step creates both
+      # on this commit. Creating the tag through the release, rather than
+      # moving the ref, is the same path the first release took.
+      - name: Remove the previous release and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete latest --cleanup-tag --yes -R "${{ github.repository }}" || true
 
       - name: Publish
         uses: softprops/action-gh-release@v3
